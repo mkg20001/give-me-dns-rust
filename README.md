@@ -17,7 +17,7 @@ nix develop
 
 Start the server with auto-reload:
 ```bash
-cargo watch -x 'run -- config.yaml'
+cargo watch -- cargo run config.yaml
 ```
 
 Or run once:
