@@ -1,0 +1,11 @@
+# Rust
+/target
+
+# Old Go artifacts
+cmd/give-me-dns/give-me-dns
+
+# Nix
+result*
+
+# IDE
+.idea

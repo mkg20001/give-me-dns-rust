@@ -1,0 +1,47 @@
+[package]
+name = "give-me-dns"
+version = "0.1.0"
+edition = "2021"
+authors = ["mkg20001"]
+description = "Temporary dynamic DNS service for IPv6 addresses"
+repository = "https://github.com/mkg20001/give-me-dns"
+license = "MIT"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.44", features = ["full"] }
+
+# HTTP server
+rocket = { version = "0.5", features = ["json"] }
+
+# DNS server - hickory-dns with DNSSEC support
+hickory-proto = { version = "0.25", features = ["dnssec-ring", "tokio"] }
+
+# Database
+sled = "0.34"
+
+# Configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Templating
+mustache = "0.9"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.16", features = ["v4"] }
+rand = "0.9"
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+base64 = "0.22"
+
+# Crypto for DNSSEC
+ring = "0.17"
+openssl = { version = "0.10", features = ["vendored"] }
+
+[profile.release]
+lto = true
+strip = true

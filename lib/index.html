@@ -1,0 +1,64 @@
+<style>
+    cmd {
+        background: #cfcfcf;
+        border-radius: 4px;
+        padding: 1px 2px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        body {
+            background: black;
+            color: whitesmoke;
+        }
+
+        cmd {
+            background: #404040;
+        }
+    }
+</style>
+<tt>
+    <h1>give-me-dns.net</h1>
+    You have IPv6, want to connect to some device and your router can't do mDNS or local domains?
+    <br><br>
+    Or, for whatever other reason, you want to be spared the pain of typing out an IPv6 address?
+    <br><br>
+    Then give-me-dns.net is just right for you!
+    <br><br>
+    Simply connect via a TCP client of your liking (like <cmd>nc give-me-dns.net 9999</cmd>) and you'll get a temporary DNS subdomain
+    <br><br>
+
+    <h3>Extras</h3>
+    There is also a <a href="/json">JSON API</a> that you can use <cmd>curl -X POST https://give-me-dns.net/json</cmd>
+    <br><br>
+    For static IPv6 suffixes see <a href="https://serverfault.com/questions/968641/configure-ipv6-address-on-interface-with-static-iid">this Serverfault post</a>
+    <br><br>
+    If you have multiple IPv6 Addresses: Either <cmd>nc -s IPV6 give-me-dns.net 9999</cmd> or <cmd>curl --interface IPV6 -X POST https://give-me-dns.net/json</cmd>
+    <br><br>
+    You can also acquire a DNS name via the browser
+    <br><br>
+
+    <h3>Current DNS name</h3>
+    {{#OK}}
+    DNS Name TTL: {{Res.TTL}}
+    <br><br>
+    Your Address: {{Res.Address}}
+    <br><br>
+    {{#Res.HasDNS}}
+    Registered DNS Name: {{Res.DNSName}}
+    <br><br>
+    Expires: {{Res.Expires}}
+    {{/Res.HasDNS}}
+    {{^Res.HasDNS}}
+    You don't have a DNS name registered
+    <br><br>
+    <form method="post" action="/"><input value="Acquire" type="submit"></form>
+    {{/Res.HasDNS}}
+    {{/OK}}
+    {{^OK}}
+    ({{Err}})
+    {{/OK}}
+    <br><br>
+
+    <hr>
+    Made by <a href="https://github.com/mkg20001">mkg20001</a> - <a href="https://github.com/mkg20001/give-me-dns">Source</a>
+</tt>
