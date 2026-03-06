@@ -1,0 +1,21 @@
+store:
+  domain: 6dns.me
+  ttl: 48h
+  file: /tmp/give-me-dns
+dns:
+  port: 5354
+  ns:
+    - "ns1.give-me-dns.net."
+    - "ns2.give-me-dns.net."
+  mname: "example.example.org."
+  dnssec_key: "UHJpdmF0ZS1rZXktZm9ybWF0OiB2MS4zCkFsZ29yaXRobTogMTMgKEVDRFNBUDI1NlNIQTI1NikKUHJpdmF0ZUtleTogc3ltS2c5V2Y3UGJ1NEt5cWphVitMSkJlZGtIODYwYTd1R2pOZmtVbHlzbz0KUHVibGljS2V5OiBuaHp5aktpVno0RHFGRDhTZ1RWY3p2Z0lVVzlBVjNmbnpaSWNWNVl1dW8wMkkvWE1JRStIUVJWUi9Ga25HRXVaOWhDTEV1bFlQVlpIdjVxbGs3SWxhZz09Cg=="
+net:
+  port: 9999
+http:
+  port: 8053
+provider:
+  wordlist:
+    enable: true
+  random:
+    enable: true
+    id_len: 3
