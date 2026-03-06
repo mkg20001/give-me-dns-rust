@@ -1,49 +1,45 @@
 {
   description = "Temporary DNS names for IPv6 addresses";
 
-  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ rust-overlay.overlays.default self.overlays.default ];
+        };
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+          extensions = [ "rust-src" "rust-analyzer" ];
+        };
+      in
+      {
+        packages = {
+          give-me-dns = pkgs.give-me-dns;
+          default = pkgs.give-me-dns;
+        };
 
-    let
-      supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
-      forAllSystems = f: nixpkgs.lib.genAttrs supportedSystems (system: f system);
-    in
-
-    {
+        devShells.default = pkgs.mkShell {
+          buildInputs = with pkgs; [
+            rustToolchain
+            cargo-watch
+            pkg-config
+            openssl
+          ];
+        };
+      }
+    ) // {
       overlays.default = final: prev: {
-        give-me-dns = prev.callPackage ./. {};
+        give-me-dns = prev.callPackage ./. { };
       };
-
-      packages = forAllSystems (system:
-        let
-          pkgs = (import nixpkgs {
-            inherit system;
-            overlays = [ self.overlays.default ];
-          });
-        in
-          {
-            inherit (pkgs) give-me-dns;
-
-            default = pkgs.give-me-dns;
-          });
-
-      devShells = forAllSystems (system:
-        let
-          pkgs = import nixpkgs { inherit system; };
-        in
-          {
-            default = pkgs.mkShell {
-              buildInputs = with pkgs; [
-                rustc
-                cargo
-                cargo-watch
-                pkg-config
-                openssl
-                rust-analyzer
-              ];
-            };
-          });
 
       nixosModules = {
         give-me-dns = import ./module.nix;
