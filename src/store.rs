@@ -101,9 +101,22 @@ impl Store {
     }
 
     pub fn add_entry(&self, ip: Ipv6Addr) -> Result<ResolvedEntry> {
-        // Check if IP already has an entry
+        // Check if IP already has an entry - refresh TTL if so
         if let Some(existing) = self.resolve_ip(ip)? {
-            return Ok(existing);
+            // Refresh the expiration time
+            let refreshed_entry = Entry {
+                expires: Utc::now() + chrono::Duration::from_std(self.ttl)?,
+                value: ip,
+            };
+            let entry_json = serde_json::to_vec(&refreshed_entry)?;
+            self.dns_tree.insert(existing.id.as_bytes(), entry_json)?;
+            self.db.flush()?;
+
+            return Ok(ResolvedEntry {
+                id: existing.id,
+                dns_name: existing.dns_name,
+                entry: refreshed_entry,
+            });
         }
 
         // Generate new ID with retry logic

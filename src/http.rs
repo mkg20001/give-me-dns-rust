@@ -27,7 +27,7 @@ pub struct DnsInfo {
 pub struct ApiResponse {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub err: Option<String>,
+    pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub res: Option<DnsInfo>,
 }
@@ -172,34 +172,46 @@ fn index_post(client_ip: ClientIp, store: &State<Arc<Store>>) -> RawHtml<String>
 }
 
 #[get("/json")]
-fn json_get(client_ip: ClientIp, store: &State<Arc<Store>>) -> Json<ApiResponse> {
+fn json_get(client_ip: ClientIp, store: &State<Arc<Store>>) -> (Status, Json<ApiResponse>) {
     match get_info(store.inner(), client_ip.0) {
-        Ok(info) => Json(ApiResponse {
-            ok: true,
-            err: None,
-            res: Some(info),
-        }),
-        Err(e) => Json(ApiResponse {
-            ok: false,
-            err: Some(e),
-            res: None,
-        }),
+        Ok(info) => (
+            Status::Ok,
+            Json(ApiResponse {
+                ok: true,
+                error: None,
+                res: Some(info),
+            }),
+        ),
+        Err(e) => (
+            Status::BadRequest,
+            Json(ApiResponse {
+                ok: false,
+                error: Some(e),
+                res: None,
+            }),
+        ),
     }
 }
 
 #[post("/json")]
-fn json_post(client_ip: ClientIp, store: &State<Arc<Store>>) -> Json<ApiResponse> {
+fn json_post(client_ip: ClientIp, store: &State<Arc<Store>>) -> (Status, Json<ApiResponse>) {
     match register_dns(store.inner(), client_ip.0) {
-        Ok(info) => Json(ApiResponse {
-            ok: true,
-            err: None,
-            res: Some(info),
-        }),
-        Err(e) => Json(ApiResponse {
-            ok: false,
-            err: Some(e),
-            res: None,
-        }),
+        Ok(info) => (
+            Status::Ok,
+            Json(ApiResponse {
+                ok: true,
+                error: None,
+                res: Some(info),
+            }),
+        ),
+        Err(e) => (
+            Status::BadRequest,
+            Json(ApiResponse {
+                ok: false,
+                error: Some(e),
+                res: None,
+            }),
+        ),
     }
 }
 

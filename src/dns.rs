@@ -6,7 +6,7 @@ use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
 use openssl::ec::{EcGroup, EcKey};
 use openssl::ecdsa::EcdsaSig;
-use openssl::hash::MessageDigest;
+use openssl::hash::{hash, MessageDigest};
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
 use openssl::sign::Signer;
@@ -21,6 +21,8 @@ use crate::store::Store;
 
 // DNSSEC Algorithm numbers
 const ALGORITHM_ECDSAP256SHA256: u8 = 13;
+// DS Digest types
+const DS_DIGEST_SHA256: u8 = 2;
 
 // DNSKEY flags
 const DNSKEY_FLAG_ZONE: u16 = 256;
@@ -60,6 +62,26 @@ impl DnssecSigner {
             key_tag,
             dnskey_rdata,
         }
+    }
+
+    /// Generate DS record string for zone delegation
+    /// DS record format: keytag algorithm digest_type digest
+    fn get_ds_record(&self, domain: &Name) -> String {
+        // DS digest is SHA-256 hash of: owner name (wire format) + DNSKEY RDATA
+        let mut ds_data = Vec::new();
+        ds_data.extend_from_slice(&name_to_wire_lowercase(domain));
+        ds_data.extend_from_slice(&self.dnskey_rdata);
+
+        let digest = hash(MessageDigest::sha256(), &ds_data).expect("SHA-256 hash failed");
+        let digest_hex = digest.iter().map(|b| format!("{:02X}", b)).collect::<String>();
+
+        format!(
+            "{} {} {} {}",
+            self.key_tag,
+            ALGORITHM_ECDSAP256SHA256,
+            DS_DIGEST_SHA256,
+            digest_hex
+        )
     }
 
     /// Calculate key tag per RFC 4034 Appendix B
@@ -217,6 +239,7 @@ impl DnsServer {
 
         if let Some(ref signer) = dnssec {
             tracing::info!("DNSSEC enabled with key tag: {}", signer.key_tag);
+            tracing::info!("DS Record: {}", signer.get_ds_record(&domain));
         }
 
         Ok(Self {
