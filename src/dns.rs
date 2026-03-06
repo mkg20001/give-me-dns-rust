@@ -344,7 +344,7 @@ impl DnsServer {
     ) -> Result<()> {
         let addr: SocketAddr = format!(
             "{}:{}",
-            self.config.address.as_deref().unwrap_or("::"),
+            self.config.address.as_deref().unwrap_or("[::]"),
             self.config.port
         )
         .parse()?;
