@@ -208,7 +208,7 @@ pub async fn run_http_server(
     store: Arc<Store>,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<()> {
-    let addr = config.address.as_deref().unwrap_or("0.0.0.0");
+    let addr = config.address.as_deref().unwrap_or("::");
     let port = config.port;
 
     let figment = rocket::Config::figment()
