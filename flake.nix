@@ -37,6 +37,7 @@
               buildInputs = with pkgs; [
                 rustc
                 cargo
+                cargo-watch
                 pkg-config
                 openssl
                 rust-analyzer
