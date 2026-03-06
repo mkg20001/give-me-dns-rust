@@ -406,6 +406,25 @@ impl DnsServer {
         )
     }
 
+    /// Create "black lies" next name: \000.<name>
+    /// This is a synthesized name that sorts immediately after the queried name
+    fn make_black_lies_next_name(name: &Name) -> Name {
+        // Prepend a null byte label to the name
+        let mut labels: Vec<&[u8]> = vec![&[0u8]]; // null byte label
+        labels.extend(name.iter());
+
+        // Build the name from labels
+        let mut result = Name::root();
+        for label in labels.into_iter().rev() {
+            if !label.is_empty() || result.is_root() {
+                if let Ok(new_name) = result.prepend_label(label) {
+                    result = new_name;
+                }
+            }
+        }
+        result
+    }
+
     fn resolve_aaaa(&self, name: &Name) -> Option<Ipv6Addr> {
         let labels: Vec<_> = name.iter().collect();
         if labels.len() < 2 {
@@ -559,21 +578,24 @@ impl DnsServer {
             if !is_main && self.resolve_aaaa(qname).is_none() {
                 response.set_response_code(ResponseCode::NXDomain);
 
-                // Add NSEC for denial of existence
+                // Add NSEC for denial of existence using "black lies" approach
+                // This creates a minimal NSEC that proves only this specific name doesn't exist
                 if do_dnssec {
-                    // NSEC proving the name doesn't exist
-                    // For simplicity, we use a wildcard NSEC covering the whole zone
+                    // Create next name as \000.<qname> (null byte prefix)
+                    let next_name = Self::make_black_lies_next_name(qname);
+
+                    // NSEC for the queried name with minimal type bitmap (RRSIG + NSEC only)
                     let nsec = self.make_nsec(
-                        &self.domain,
-                        &self.domain, // Points back to itself (only name in zone apex)
-                        &[RecordType::NS, RecordType::SOA, RecordType::DNSKEY, RecordType::NSEC],
+                        qname,
+                        &next_name,
+                        &[RecordType::RRSIG, RecordType::NSEC],
                     );
                     response.add_name_server(nsec.clone());
 
                     // Sign NSEC
                     if let Some(ref signer) = self.dnssec {
                         if let Ok(rrsig) = signer.sign_rrset(&[nsec], &self.domain, 3600) {
-                            response.add_name_server(self.make_rrsig(&self.domain, 3600, rrsig));
+                            response.add_name_server(self.make_rrsig(qname, 3600, rrsig));
                         }
                     }
                 }
