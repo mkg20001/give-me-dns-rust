@@ -112,17 +112,19 @@ impl DnssecSigner {
 
         let rr_type = rrset[0].record_type();
         let rr_class = rrset[0].dns_class();
+        let owner_name = rrset[0].name();
 
-        // RRSIG timing
+        // RRSIG timing - use longer validity to handle clock skew
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as u32;
-        let inception = now - 3600; // 1 hour ago
-        let expiration = now + (original_ttl + 3600); // TTL + 1 hour buffer
+        let inception = now - 86400; // 1 day ago (handles clock skew)
+        let expiration = now + 86400 * 7; // 7 days from now
 
         // Build RRSIG RDATA (without signature)
         let mut rrsig_rdata = Vec::new();
         rrsig_rdata.extend_from_slice(&u16::from(rr_type).to_be_bytes()); // Type Covered
         rrsig_rdata.push(ALGORITHM_ECDSAP256SHA256); // Algorithm
-        rrsig_rdata.push(signer_name.num_labels()); // Labels
+        // Labels: count of labels in owner name, excluding root label (RFC 4034 Section 3.1.3)
+        rrsig_rdata.push(owner_name.num_labels());
         rrsig_rdata.extend_from_slice(&original_ttl.to_be_bytes()); // Original TTL
         rrsig_rdata.extend_from_slice(&expiration.to_be_bytes()); // Signature Expiration
         rrsig_rdata.extend_from_slice(&inception.to_be_bytes()); // Signature Inception
@@ -576,17 +578,48 @@ impl DnsServer {
                 }
             }
 
-            // NXDOMAIN for non-existent names
-            if !is_main && self.resolve_aaaa(qname).is_none() {
+            // Determine if name exists (NODATA) or doesn't exist (NXDOMAIN)
+            let name_exists = is_main || self.resolve_aaaa(qname).is_some();
+
+            if name_exists {
+                // NODATA: Name exists but requested type doesn't
+                // Add NSEC proving which types DO exist at this name
+                if do_dnssec {
+                    let next_name = Self::make_black_lies_next_name(qname);
+
+                    // Type bitmap includes types that exist at this name
+                    let existing_types = if is_main {
+                        // Apex has SOA, NS, DNSKEY
+                        vec![
+                            RecordType::SOA,
+                            RecordType::NS,
+                            RecordType::DNSKEY,
+                            RecordType::RRSIG,
+                            RecordType::NSEC,
+                        ]
+                    } else {
+                        // Subdomains have AAAA
+                        vec![RecordType::AAAA, RecordType::RRSIG, RecordType::NSEC]
+                    };
+
+                    let nsec = self.make_nsec(qname, &next_name, &existing_types);
+                    response.add_name_server(nsec.clone());
+
+                    if let Some(ref signer) = self.dnssec {
+                        if let Ok(rrsig) = signer.sign_rrset(&[nsec], &self.domain, 3600) {
+                            response.add_name_server(self.make_rrsig(qname, 3600, rrsig));
+                        }
+                    }
+                }
+            } else {
+                // NXDOMAIN: Name does not exist
                 response.set_response_code(ResponseCode::NXDomain);
 
                 // Add NSEC for denial of existence using "black lies" approach
-                // This creates a minimal NSEC that proves only this specific name doesn't exist
                 if do_dnssec {
-                    // Create next name as \000.<qname> (null byte prefix)
                     let next_name = Self::make_black_lies_next_name(qname);
 
-                    // NSEC for the queried name with minimal type bitmap (RRSIG + NSEC only)
+                    // NSEC with minimal type bitmap (only RRSIG + NSEC)
                     let nsec = self.make_nsec(
                         qname,
                         &next_name,
@@ -594,7 +627,6 @@ impl DnsServer {
                     );
                     response.add_name_server(nsec.clone());
 
-                    // Sign NSEC
                     if let Some(ref signer) = self.dnssec {
                         if let Ok(rrsig) = signer.sign_rrset(&[nsec], &self.domain, 3600) {
                             response.add_name_server(self.make_rrsig(qname, 3600, rrsig));
