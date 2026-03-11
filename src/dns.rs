@@ -4,12 +4,9 @@ use hickory_proto::op::{Edns, MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::rdata::{AAAA, NS, SOA};
 use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 use hickory_proto::serialize::binary::{BinDecodable, BinEncodable};
-use openssl::ec::{EcGroup, EcKey};
-use openssl::ecdsa::EcdsaSig;
-use openssl::hash::{hash, MessageDigest};
-use openssl::nid::Nid;
-use openssl::pkey::PKey;
-use openssl::sign::Signer;
+use ring::digest::{digest, SHA256};
+use ring::rand::SystemRandom;
+use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use std::net::{Ipv6Addr, SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -38,13 +35,13 @@ pub struct DnsServer {
 #[allow(dead_code)]
 struct DnssecSigner {
     public_key: Vec<u8>,
-    private_key: PKey<openssl::pkey::Private>,
+    key_pair: EcdsaKeyPair,
     key_tag: u16,
     dnskey_rdata: Vec<u8>,
 }
 
 impl DnssecSigner {
-    fn new(public_key: Vec<u8>, private_key: PKey<openssl::pkey::Private>) -> Self {
+    fn new(public_key: Vec<u8>, key_pair: EcdsaKeyPair) -> Self {
         // Build DNSKEY RDATA: Flags (2) + Protocol (1) + Algorithm (1) + Public Key
         let flags: u16 = DNSKEY_FLAG_ZONE | DNSKEY_FLAG_SEP; // 257
         let mut dnskey_rdata = Vec::new();
@@ -58,7 +55,7 @@ impl DnssecSigner {
 
         Self {
             public_key,
-            private_key,
+            key_pair,
             key_tag,
             dnskey_rdata,
         }
@@ -72,8 +69,12 @@ impl DnssecSigner {
         ds_data.extend_from_slice(&name_to_wire_lowercase(domain));
         ds_data.extend_from_slice(&self.dnskey_rdata);
 
-        let digest = hash(MessageDigest::sha256(), &ds_data).expect("SHA-256 hash failed");
-        let digest_hex = digest.iter().map(|b| format!("{:02X}", b)).collect::<String>();
+        let hash = digest(&SHA256, &ds_data);
+        let digest_hex = hash
+            .as_ref()
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<String>();
 
         format!(
             "{} {} {} {}",
@@ -157,19 +158,15 @@ impl DnssecSigner {
             sign_data.extend_from_slice(&rr_wire);
         }
 
-        // Sign with ECDSA P-256 SHA-256
-        let mut signer = Signer::new(MessageDigest::sha256(), &self.private_key)?;
-        signer.update(&sign_data)?;
-        let der_sig = signer.sign_to_vec()?;
+        // Sign with ECDSA P-256 SHA-256 using ring
+        let rng = SystemRandom::new();
+        let signature = self
+            .key_pair
+            .sign(&rng, &sign_data)
+            .map_err(|_| anyhow::anyhow!("Signing failed"))?;
 
-        // Convert DER signature to DNS wire format (R || S, each 32 bytes)
-        let ecdsa_sig = EcdsaSig::from_der(&der_sig)?;
-        let r = ecdsa_sig.r().to_vec_padded(32)?;
-        let s = ecdsa_sig.s().to_vec_padded(32)?;
-
-        // Append signature to RRSIG RDATA
-        rrsig_rdata.extend_from_slice(&r);
-        rrsig_rdata.extend_from_slice(&s);
+        // ring's ECDSA_P256_SHA256_FIXED produces R || S directly (64 bytes)
+        rrsig_rdata.extend_from_slice(signature.as_ref());
 
         Ok(rrsig_rdata)
     }
@@ -251,28 +248,27 @@ impl DnsServer {
     }
 
     fn generate_dnssec_key() -> Result<(DnssecSigner, String)> {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
-        let ec_key = EcKey::generate(&group)?;
-        let private_key = PKey::from_ec_key(ec_key.clone())?;
+        let rng = SystemRandom::new();
+        let pkcs8_bytes = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
+            .map_err(|_| anyhow::anyhow!("Key generation failed"))?;
 
-        // Get the public key in uncompressed format
-        let mut ctx = openssl::bn::BigNumContext::new()?;
-        let public_key_bytes = ec_key.public_key().to_bytes(
-            &group,
-            openssl::ec::PointConversionForm::UNCOMPRESSED,
-            &mut ctx,
-        )?;
+        let key_pair =
+            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8_bytes.as_ref(), &rng)
+                .map_err(|_| anyhow::anyhow!("Failed to parse generated key"))?;
+
+        // Get public key - ring returns it in uncompressed format (0x04 || X || Y)
+        let public_key_uncompressed = key_pair.public_key().as_ref();
 
         // DNSKEY public key format: skip the 0x04 prefix for uncompressed point
-        let dnskey_pubkey = public_key_bytes[1..].to_vec();
+        let dnskey_pubkey = public_key_uncompressed[1..].to_vec();
 
-        let signer = DnssecSigner::new(dnskey_pubkey.clone(), private_key);
+        let signer = DnssecSigner::new(dnskey_pubkey.clone(), key_pair);
 
-        // Serialize for export
+        // Serialize for export (store PKCS#8 and public key)
         let public_b64 = BASE64.encode(&dnskey_pubkey);
         let export_data = format!(
             "Private-key-format: v1.3\nAlgorithm: 13 (ECDSAP256SHA256)\nPrivateKey: {}\nPublicKey: {}\n",
-            BASE64.encode(ec_key.private_key().to_vec()),
+            BASE64.encode(pkcs8_bytes.as_ref()),
             public_b64
         );
 
@@ -299,23 +295,29 @@ impl DnsServer {
         let public_key_bytes = BASE64
             .decode(public_key_b64.ok_or_else(|| anyhow::anyhow!("Missing PublicKey"))?)?;
 
-        // Reconstruct the EC key
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)?;
-        let private_bn = openssl::bn::BigNum::from_slice(&private_key_bytes)?;
+        let rng = SystemRandom::new();
 
-        let mut public_uncompressed = vec![0x04];
-        public_uncompressed.extend_from_slice(&public_key_bytes);
+        // Try PKCS#8 format first (new format), fall back to raw scalar (old format)
+        let key_pair = if private_key_bytes.len() == 32 {
+            // Old format: raw 32-byte private key scalar
+            // Public key needs 0x04 prefix for uncompressed point format
+            let mut public_uncompressed = vec![0x04];
+            public_uncompressed.extend_from_slice(&public_key_bytes);
 
-        let mut ctx = openssl::bn::BigNumContext::new()?;
-        let public_point =
-            openssl::ec::EcPoint::from_bytes(&group, &public_uncompressed, &mut ctx)?;
+            EcdsaKeyPair::from_private_key_and_public_key(
+                &ECDSA_P256_SHA256_FIXED_SIGNING,
+                &private_key_bytes,
+                &public_uncompressed,
+                &rng,
+            )
+            .map_err(|_| anyhow::anyhow!("Failed to load raw EC key"))?
+        } else {
+            // New format: PKCS#8 encoded key
+            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &private_key_bytes, &rng)
+                .map_err(|_| anyhow::anyhow!("Failed to load PKCS#8 key"))?
+        };
 
-        let ec_key = EcKey::from_private_components(&group, &private_bn, &public_point)?;
-        ec_key.check_key()?;
-
-        let private_key = PKey::from_ec_key(ec_key)?;
-
-        Ok(DnssecSigner::new(public_key_bytes, private_key))
+        Ok(DnssecSigner::new(public_key_bytes, key_pair))
     }
 
     fn get_soa(&self) -> Record {

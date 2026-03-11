@@ -1,7 +1,6 @@
 { rustPlatform
 , lib
 , pkg-config
-, openssl
 }:
 
 rustPlatform.buildRustPackage {
@@ -15,7 +14,7 @@ rustPlatform.buildRustPackage {
   };
 
   nativeBuildInputs = [ pkg-config ];
-  buildInputs = [ openssl ];
+  buildInputs = [];
 
   meta = with lib; {
     description = "Temporary DNS names for IPv6 addresses";

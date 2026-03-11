@@ -40,7 +40,6 @@ base64 = "0.22"
 
 # Crypto for DNSSEC
 ring = "0.17"
-openssl = { version = "0.10", features = ["vendored"] }
 
 [profile.release]
 lto = true

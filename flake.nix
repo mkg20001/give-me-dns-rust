@@ -32,7 +32,7 @@
             rustToolchain
             cargo-watch
             pkg-config
-            openssl
+            perl
           ];
         };
       }
