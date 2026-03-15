@@ -493,6 +493,16 @@ impl DnsServer {
         let main_domain = format!("{}.", self.store.domain());
         let is_main = qname.to_lowercase().to_string() == main_domain.to_lowercase();
 
+        // Check if query is within our zone (must be domain or subdomain of it)
+        // zone_of checks if self is a zone of the argument, so we check if our domain is a zone of qname
+        let is_in_zone = is_main || self.domain.zone_of(qname);
+        if !is_in_zone {
+            // Not our zone - return REFUSED
+            response.set_authoritative(false);
+            response.set_response_code(ResponseCode::Refused);
+            return response;
+        }
+
         tracing::debug!("Query: {} {} (DNSSEC: {})", qname, qtype, do_dnssec);
 
         match qtype {
