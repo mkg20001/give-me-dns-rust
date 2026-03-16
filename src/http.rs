@@ -226,7 +226,9 @@ pub async fn run_http_server(
     let figment = rocket::Config::figment()
         .merge(("address", addr))
         .merge(("port", port))
-        .merge(("log_level", "normal"));
+        .merge(("log_level", "normal"))
+        .merge(("shutdown.grace", 1))
+        .merge(("shutdown.mercy", 1));
 
     let rocket = rocket::custom(figment)
         .manage(store)
